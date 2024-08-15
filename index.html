@@ -1,318 +1,388 @@
-import React, { useState } from 'react';
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Option Matching Calculator</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        .input-section, .output-section {
+            border: 1px solid #ccc;
+            padding: 20px;
+            border-radius: 8px;
+        }
+        .input-row {
+            margin-bottom: 10px;
+        }
+        select, input, button {
+            margin-right: 10px;
+            padding: 5px;
+        }
+        input[type="text"] {
+            width: 200px;
+        }
+        input[type="number"] {
+            width: 80px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            border: 1px solid #ccc;
+            padding: 8px;
+            text-align: left;
+        }
+        .error {
+            color: red;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="container">
+            <div class="instructions">
+                <h2>期权匹配引擎使用说明</h2>
+                
+                <h3>概述</h3>
+                <p>本工具用于计算期权和股票的最佳匹配组合。它可以帮助您找出可用和非可用的组合,以及剩余的单腿头寸。</p>
+                
+                <h3>输入说明</h3>
+                <ul>
+                    <li><strong>类型</strong>: 选择头寸类型 (做多看涨/做空看涨/做多看跌/做空看跌/做多股票/做空股票)</li>
+                    <li><strong>代码</strong>: 
+                        <ul>
+                            <li>对于期权: 输入格式为 "股票代码 到期日CP行权价", 例如 "BABA 210205C00055000"</li>
+                            <li>对于股票: 输入股票代码, 例如 "BABA"</li>
+                        </ul>
+                    </li>
+                    <li><strong>可用数量</strong>: 输入当前可用的合约或股票数量（请勿输入负数）</li>
+                    <li><strong>订单数量</strong>: 输入计划交易的合约或股票数量（请勿输入负数）</li>
+                </ul>
+    
+                <h3>使用步骤</h3>
+                <ol>
+                    <li>在输入区域填写您的头寸信息</li>
+                    <li>如需添加更多头寸,点击"添加输入"按钮</li>
+                    <li>填写完所有头寸后,点击"计算"按钮</li>
+                    <li>查看结果输出区域,了解可用组合、非可用组合和剩余单腿情况</li>
+                    <li>如需重新开始,点击"重置"按钮</li>
+                </ol>
+            </div>
 
-// 辅助函数：获取腿类型索引
-const getLegTypeIndex = (type) => {
-  const types = ['long call', 'short call', 'long put', 'short put', 'long stock', 'short stock'];
-  return types.indexOf(type);
-};
+        <div class="input-section">
+            <h2>用户输入</h2>
+            <div id="inputs"></div>
+            <div id="error" class="error"></div>
+            <button onclick="addInput()">添加输入</button>
+            <button onclick="handleSubmit()">计算</button>
+            <button onclick="handleReset()">重置</button>
+        </div>
+        <div id="result" class="output-section" style="display: none;">
+            <h2>结果输出</h2>
+            <div id="availableCombinations"></div>
+            <div id="nonAvailableCombinations"></div>
+            <div id="remainingLegs"></div>
+        </div>
+    </div>
 
-// 辅助函数：获取腿类型名称
-const getLegTypeName = (index) => {
-  const types = ['long Call', 'short Call', 'long Put', 'short Put', 'long Stock', 'short Stock'];
-  return types[index];
-};
+    <script>
+        let inputs = [{ type: 'long call', code: '', available: '', order: '' }];
 
-// 验证代码格式
-const isValidCode = (code, type) => {
-  if (type.includes('stock')) {
-    // 股票代码格式: 1-5个大写字母
-    return /^[A-Z]{1,5}$/.test(code);
-  } else {
-    // 期权代码格式: 股票代码(空格)日期C/P行权价
-    return /^[A-Z]{1,5}\s\d{6}[CP]\d{8}$/.test(code);
-  }
-};
+        const getLegTypeIndex = (type) => {
+            const types = ['long call', 'short call', 'long put', 'short put', 'long stock', 'short stock'];
+            return types.indexOf(type);
+        };
 
-const OptionMatchingCalculator = () => {
-  const initialInput = { type: 'long call', code: '', available: '', order: '' };
-  
-  const [inputs, setInputs] = useState([initialInput]);
-  const [result, setResult] = useState(null);
-  const [error, setError] = useState('');
+        const getLegTypeName = (index) => {
+            const types = ['long Call', 'short Call', 'long Put', 'short Put', 'long Stock', 'short Stock'];
+            return types[index];
+        };
 
-  const handleInputChange = (index, field, value) => {
-    const newInputs = [...inputs];
-    if (field === 'available' || field === 'order') {
-      value = value === '' ? '' : Number(value);
-    }
-    newInputs[index][field] = value;
-    setInputs(newInputs);
-  };
+        const isValidCode = (code, type) => {
+            if (type.includes('stock')) {
+                return /^[A-Z]{1,5}$/.test(code);
+            } else {
+                return /^[A-Z]{1,5}\s\d{6}[CP]\d{8}$/.test(code);
+            }
+        };
 
-  const handleAddInput = () => {
-    setInputs([...inputs, { ...initialInput }]);
-  };
-
-  const parseUserInput = (userData) => {
-    const availableVector = new Array(6).fill(0);
-    const nonAvailableVector = new Array(6).fill(0);
-    const codeMapping = {
-      'long Call': [], 'short Call': [], 'long Put': [], 'short Put': [], 'long Stock': [], 'short Stock': []
-    };
-
-    userData.forEach(item => {
-      const index = getLegTypeIndex(item.type);
-      availableVector[index] += Number(item.available) || 0;
-      nonAvailableVector[index] += Number(item.order) || 0;
-      if (item.code) {
-        codeMapping[getLegTypeName(index)].push(item.code);
-      }
-    });
-
-    return { availableVector, nonAvailableVector, codeMapping };
-  };
-
-  const calculateCombinations = (availableVector, nonAvailableVector, codeMapping) => {
-    const totalVector = availableVector.map((v, i) => v + nonAvailableVector[i]);
-
-    const targetVectors = {
-      '1B': [0, 1, 0, 0, 1, 0], '1D': [0, 0, 0, 1, 0, 1],
-      '1A': [0, 0, 1, 0, 1, 0], '1C': [1, 0, 0, 0, 0, 1],
-      '2B': [1, 1, 0, 0, 0, 0], '2A': [0, 0, 1, 1, 0, 0],
-      '2C': [0, 1, 0, 1, 0, 0], '2D': [1, 0, 1, 0, 0, 0]
-    };
-
-    const calculateCombinationCounts = (vector) => {
-      const counts = {};
-      const details = {};
-      const remainingVector = [...vector];
-
-      for (const [comb, targetVector] of Object.entries(targetVectors)) {
-        const minRatio = Math.min(...targetVector.map((t, i) => t > 0 ? remainingVector[i] / t : Infinity));
-        const count = Math.floor(minRatio);
-        counts[comb] = count;
-        for (let i = 0; i < 6; i++) {
-          remainingVector[i] -= count * targetVector[i];
+        function renderInputs() {
+            const inputsContainer = document.getElementById('inputs');
+            inputsContainer.innerHTML = '';
+            inputs.forEach((input, index) => {
+                const row = document.createElement('div');
+                row.className = 'input-row';
+                row.innerHTML = `
+                    <select onchange="handleInputChange(${index}, 'type', this.value)">
+                        <option value="long call" ${input.type === 'long call' ? 'selected' : ''}>Long Call</option>
+                        <option value="short call" ${input.type === 'short call' ? 'selected' : ''}>Short Call</option>
+                        <option value="long put" ${input.type === 'long put' ? 'selected' : ''}>Long Put</option>
+                        <option value="short put" ${input.type === 'short put' ? 'selected' : ''}>Short Put</option>
+                        <option value="long stock" ${input.type === 'long stock' ? 'selected' : ''}>Long Stock</option>
+                        <option value="short stock" ${input.type === 'short stock' ? 'selected' : ''}>Short Stock</option>
+                    </select>
+                    <input type="text" placeholder="${input.type.includes('stock') ? '股票代码 (如: BABA)' : '期权代码 (如: BABA 210205C00055000)'}" value="${input.code}" onchange="handleInputChange(${index}, 'code', this.value)">
+                    <input type="number" placeholder="可用数量" value="${input.available}" onchange="handleInputChange(${index}, 'available', this.value)">
+                    <input type="number" placeholder="订单数量" value="${input.order}" onchange="handleInputChange(${index}, 'order', this.value)">
+                `;
+                if (input.error) {
+                    const errorDiv = document.createElement('div');
+                    errorDiv.className = 'error';
+                    errorDiv.textContent = input.error;
+                    row.appendChild(errorDiv);
+                }
+                inputsContainer.appendChild(row);
+            });
         }
 
-        details[comb] = {
-          available: count,
-          details: targetVector.map((t, i) => t > 0 ? {
-            type: getLegTypeName(i),
-            code: codeMapping[getLegTypeName(i)][0] || 'N/A'
-          } : null).filter(Boolean)
-        };
-      }
+        function handleInputChange(index, field, value) {
+            inputs[index][field] = value;
+            if (field === 'available' || field === 'order') {
+                inputs[index][field] = value === '' ? '' : Number(value);
+            }
+            renderInputs();
+        }
 
-      return { counts, details, remainingVector };
-    };
+        function addInput() {
+            inputs.push({ type: 'long call', code: '', available: '', order: '' });
+            renderInputs();
+        }
 
-    const totalResult = calculateCombinationCounts(totalVector);
-    const availableResult = calculateCombinationCounts(availableVector);
+        function handleReset() {
+            inputs = [{ type: 'long call', code: '', available: '', order: '' }];
+            renderInputs();
+            document.getElementById('result').style.display = 'none';
+            document.getElementById('error').textContent = '';
+        }
 
-    const nonAvailableCounts = {};
-    for (const comb in totalResult.counts) {
-      nonAvailableCounts[comb] = totalResult.counts[comb] - availableResult.counts[comb];
-    }
+        function parseUserInput(userData) {
+            const availableVector = new Array(6).fill(0);
+            const nonAvailableVector = new Array(6).fill(0);
+            const codeMapping = {
+                'long Call': [], 'short Call': [], 'long Put': [], 'short Put': [], 'long Stock': [], 'short Stock': []
+            };
 
-    return {
-      combinationCountsAvailable: availableResult.counts,
-      combinationDetailsAvailable: availableResult.details,
-      combinationCountsNonAvailable: nonAvailableCounts,
-      combinationDetailsNonAvailable: totalResult.details,
-      remainingVectorFinal: totalResult.remainingVector,
-      codeMapping
-    };
-  };
+            userData.forEach(item => {
+                const index = getLegTypeIndex(item.type);
+                availableVector[index] += Number(item.available) || 0;
+                nonAvailableVector[index] += Number(item.order) || 0;
+                if (item.code) {
+                    codeMapping[getLegTypeName(index)].push(item.code);
+                }
+            });
 
-  const formatOutput = (result) => {
-    const { 
-      combinationCountsAvailable, 
-      combinationDetailsAvailable, 
-      combinationCountsNonAvailable, 
-      combinationDetailsNonAvailable, 
-      remainingVectorFinal, 
-      codeMapping 
-    } = result;
+            return { availableVector, nonAvailableVector, codeMapping };
+        }
 
-    const output = {
-      available_combinations: {},
-      non_available_combinations: {},
-      remaining_legs: []
-    };
+        function calculateCombinations(availableVector, nonAvailableVector, codeMapping) {
+            const totalVector = availableVector.map((v, i) => v + nonAvailableVector[i]);
 
-    for (const comb in combinationCountsAvailable) {
-      if (combinationCountsAvailable[comb] > 0) {
-        output.available_combinations[comb] = {
-          count: combinationCountsAvailable[comb],
-          details: combinationDetailsAvailable[comb].details
-        };
-      }
-    }
+            const targetVectors = {
+                '1B': [0, 1, 0, 0, 1, 0], '1D': [0, 0, 0, 1, 0, 1],
+                '1A': [0, 0, 1, 0, 1, 0], '1C': [1, 0, 0, 0, 0, 1],
+                '2B': [1, 1, 0, 0, 0, 0], '2A': [0, 0, 1, 1, 0, 0],
+                '2C': [0, 1, 0, 1, 0, 0], '2D': [1, 0, 1, 0, 0, 0]
+            };
 
-    for (const comb in combinationCountsNonAvailable) {
-      if (combinationCountsNonAvailable[comb] > 0) {
-        output.non_available_combinations[comb] = {
-          count: combinationCountsNonAvailable[comb],
-          details: combinationDetailsNonAvailable[comb].details
-        };
-      }
-    }
+            const calculateCombinationCounts = (vector) => {
+                const counts = {};
+                const details = {};
+                const remainingVector = [...vector];
 
-    remainingVectorFinal.forEach((count, i) => {
-      if (count > 0) {
-        output.remaining_legs.push({
-          type: getLegTypeName(i),
-          count: count,
-          code: codeMapping[getLegTypeName(i)][0] || 'N/A'
-        });
-      }
-    });
+                for (const [comb, targetVector] of Object.entries(targetVectors)) {
+                    const minRatio = Math.min(...targetVector.map((t, i) => t > 0 ? remainingVector[i] / t : Infinity));
+                    const count = Math.floor(minRatio);
+                    counts[comb] = count;
+                    for (let i = 0; i < 6; i++) {
+                        remainingVector[i] -= count * targetVector[i];
+                    }
 
-    return output;
-  };
+                    details[comb] = {
+                        available: count,
+                        details: targetVector.map((t, i) => t > 0 ? {
+                            type: getLegTypeName(i),
+                            code: codeMapping[getLegTypeName(i)][0] || 'N/A'
+                        } : null).filter(Boolean)
+                    };
+                }
 
-  const handleSubmit = () => {
-    let hasError = false;
-    const newInputs = inputs.map(input => {
-      if (input.code && !isValidCode(input.code, input.type)) {
-        hasError = true;
-        return { ...input, error: `无效的${input.type.includes('stock') ? '股票' : '期权'}代码格式。` };
-      }
-      return { ...input, error: '' };
-    });
+                return { counts, details, remainingVector };
+            };
 
-    if (hasError) {
-      setInputs(newInputs);
-      setError('请修正所有无效的代码格式后再提交。');
-      return;
-    }
+            const totalResult = calculateCombinationCounts(totalVector);
+            const availableResult = calculateCombinationCounts(availableVector);
 
-    setError('');
-    const { availableVector, nonAvailableVector, codeMapping } = parseUserInput(inputs);
-    const calculatedResult = calculateCombinations(availableVector, nonAvailableVector, codeMapping);
-    const formattedResult = formatOutput(calculatedResult);
-    setResult(formattedResult);
-  };
+            const nonAvailableCounts = {};
+            for (const comb in totalResult.counts) {
+                nonAvailableCounts[comb] = totalResult.counts[comb] - availableResult.counts[comb];
+            }
 
-  const handleReset = () => {
-    setInputs([{ ...initialInput }]);
-    setResult(null);
-    setError('');
-  };
+            return {
+                combinationCountsAvailable: availableResult.counts,
+                combinationDetailsAvailable: availableResult.details,
+                combinationCountsNonAvailable: nonAvailableCounts,
+                combinationDetailsNonAvailable: totalResult.details,
+                remainingVectorFinal: totalResult.remainingVector,
+                codeMapping
+            };
+        }
 
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', padding: '20px' }}>
-      <div style={{ border: '1px solid #ccc', padding: '20px', borderRadius: '8px' }}>
-        <h2>用户输入</h2>
-        {inputs.map((input, index) => (
-          <div key={index} style={{ marginBottom: '10px' }}>
-            <select
-              value={input.type}
-              onChange={(e) => handleInputChange(index, 'type', e.target.value)}
-              style={{ marginRight: '10px', padding: '5px' }}
-            >
-              <option value="long call">Long Call</option>
-              <option value="short call">Short Call</option>
-              <option value="long put">Long Put</option>
-              <option value="short put">Short Put</option>
-              <option value="long stock">Long Stock</option>
-              <option value="short stock">Short Stock</option>
-            </select>
-            <input
-              type="text"
-              placeholder={input.type.includes('stock') ? "股票代码 (如: BABA)" : "期权代码 (如: BABA 210205C00055000)"}
-              value={input.code}
-              onChange={(e) => handleInputChange(index, 'code', e.target.value)}
-              style={{ marginRight: '10px', padding: '5px', width: '200px' }}
-            />
-            <input
-              type="text"
-              placeholder="可用数量"
-              value={input.available}
-              onChange={(e) => handleInputChange(index, 'available', e.target.value)}
-              style={{ marginRight: '10px', padding: '5px', width: '80px' }}
-            />
-            <input
-              type="text"
-              placeholder="订单数量"
-              value={input.order}
-              onChange={(e) => handleInputChange(index, 'order', e.target.value)}
-              style={{ marginRight: '10px', padding: '5px', width: '80px' }}
-            />
-            {input.error && <div style={{ color: 'red' }}>{input.error}</div>}
-          </div>
-        ))}
-        {error && <div style={{ color: 'red', marginBottom: '10px' }}>{error}</div>}
-        <button onClick={handleAddInput} style={{ marginRight: '10px', padding: '5px 10px' }}>添加输入</button>
-        <button onClick={handleSubmit} style={{ marginRight: '10px', padding: '5px 10px' }}>计算</button>
-        <button onClick={handleReset} style={{ padding: '5px 10px' }}>重置</button>
-      </div>
+        function formatOutput(result) {
+            const { 
+                combinationCountsAvailable, 
+                combinationDetailsAvailable, 
+                combinationCountsNonAvailable, 
+                combinationDetailsNonAvailable, 
+                remainingVectorFinal, 
+                codeMapping 
+            } = result;
 
-      {result && (
-        <div style={{ border: '1px solid #ccc', padding: '20px', borderRadius: '8px' }}>
-          <h2>结果输出</h2>
-          <h3>可用组合</h3>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr>
-                <th style={{ border: '1px solid #ccc', padding: '8px' }}>组合</th>
-                <th style={{ border: '1px solid #ccc', padding: '8px' }}>数量</th>
-                <th style={{ border: '1px solid #ccc', padding: '8px' }}>详情</th>
-              </tr>
-            </thead>
-            <tbody>
-              {Object.entries(result.available_combinations).map(([key, value]) => (
-                <tr key={key}>
-                  <td style={{ border: '1px solid #ccc', padding: '8px' }}>{key}</td>
-                  <td style={{ border: '1px solid #ccc', padding: '8px' }}>{value.count}</td>
-                  <td style={{ border: '1px solid #ccc', padding: '8px' }}>
-                    {value.details.map((detail, index) => (
-                      <div key={index}>{detail.type}: {detail.code}</div>
-                    ))}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+            const output = {
+                available_combinations: {},
+                non_available_combinations: {},
+                remaining_legs: []
+            };
 
-          <h3>非可用组合</h3>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr>
-                <th style={{ border: '1px solid #ccc', padding: '8px' }}>组合</th>
-                <th style={{ border: '1px solid #ccc', padding: '8px' }}>数量</th>
-                <th style={{ border: '1px solid #ccc', padding: '8px' }}>详情</th>
-              </tr>
-            </thead>
-            <tbody>
-              {Object.entries(result.non_available_combinations).map(([key, value]) => (
-                <tr key={key}>
-                  <td style={{ border: '1px solid #ccc', padding: '8px' }}>{key}</td>
-                  <td style={{ border: '1px solid #ccc', padding: '8px' }}>{value.count}</td>
-                  <td style={{ border: '1px solid #ccc', padding: '8px' }}>
-                    {value.details.map((detail, index) => (
-                      <div key={index}>{detail.type}: {detail.code}</div>
-                    ))}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+            for (const comb in combinationCountsAvailable) {
+                if (combinationCountsAvailable[comb] > 0) {
+                    output.available_combinations[comb] = {
+                        count: combinationCountsAvailable[comb],
+                        details: combinationDetailsAvailable[comb].details
+                    };
+                }
+            }
 
-          <h3>剩余单腿</h3>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr>
-                <th style={{ border: '1px solid #ccc', padding: '8px' }}>类型</th>
-                <th style={{ border: '1px solid #ccc', padding: '8px' }}>数量</th>
-                <th style={{ border: '1px solid #ccc', padding: '8px' }}>代码</th>
-              </tr>
-            </thead>
-            <tbody>
-              {result.remaining_legs.map((leg, index) => (
-                <tr key={index}>
-                  <td style={{ border: '1px solid #ccc', padding: '8px' }}>{leg.type}</td>
-                  <td style={{ border: '1px solid #ccc', padding: '8px' }}>{leg.count}</td>
-                  <td style={{ border: '1px solid #ccc', padding: '8px' }}>{leg.code}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-};
+            for (const comb in combinationCountsNonAvailable) {
+                if (combinationCountsNonAvailable[comb] > 0) {
+                    output.non_available_combinations[comb] = {
+                        count: combinationCountsNonAvailable[comb],
+                        details: combinationDetailsNonAvailable[comb].details
+                    };
+                }
+            }
 
-export default OptionMatchingCalculator;
+            remainingVectorFinal.forEach((count, i) => {
+                if (count > 0) {
+                    output.remaining_legs.push({
+                        type: getLegTypeName(i),
+                        count: count,
+                        code: codeMapping[getLegTypeName(i)][0] || 'N/A'
+                    });
+                }
+            });
+
+            return output;
+        }
+
+        function handleSubmit() {
+            let hasError = false;
+            inputs = inputs.map(input => {
+                if (input.code && !isValidCode(input.code, input.type)) {
+                    hasError = true;
+                    return { ...input, error: `无效的${input.type.includes('stock') ? '股票' : '期权'}代码格式。` };
+                }
+                return { ...input, error: '' };
+            });
+
+            if (hasError) {
+                renderInputs();
+                document.getElementById('error').textContent = '请修正所有无效的代码格式后再提交。';
+                return;
+            }
+
+            document.getElementById('error').textContent = '';
+            const { availableVector, nonAvailableVector, codeMapping } = parseUserInput(inputs);
+            const calculatedResult = calculateCombinations(availableVector, nonAvailableVector, codeMapping);
+            const formattedResult = formatOutput(calculatedResult);
+            renderResult(formattedResult);
+        }
+
+        function renderResult(result) {
+            const resultContainer = document.getElementById('result');
+            resultContainer.style.display = 'block';
+
+            const availableCombinations = document.getElementById('availableCombinations');
+            const nonAvailableCombinations = document.getElementById('nonAvailableCombinations');
+            const remainingLegs = document.getElementById('remainingLegs');
+
+            availableCombinations.innerHTML = `
+                <h3>可用组合</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>组合</th>
+                            <th>数量</th>
+                            <th>详情</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${Object.entries(result.available_combinations).map(([key, value]) => `
+                            <tr>
+                                <td>${key}</td>
+                                <td>${value.count}</td>
+                                <td>${value.details.map(detail => `${detail.type}: ${detail.code}`).join('<br>')}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+
+            nonAvailableCombinations.innerHTML = `
+                <h3>非可用组合</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>组合</th>
+                            <th>数量</th>
+                            <th>详情</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${Object.entries(result.non_available_combinations).map(([key, value]) => `
+                            <tr>
+                                <td>${key}</td>
+                                <td>${value.count}</td>
+                                <td>${value.details.map(detail => `${detail.type}: ${detail.code}`).join('<br>')}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+
+            remainingLegs.innerHTML = `
+                <h3>剩余单腿</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>类型</th>
+                            <th>数量</th>
+                            <th>代码</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${result.remaining_legs.map(leg => `
+                            <tr>
+                                <td>${leg.type}</td>
+                                <td>${leg.count}</td>
+                                <td>${leg.code}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+        }
+
+        // 初始化页面
+        renderInputs();
+    </script>
+</body>
+</html>
